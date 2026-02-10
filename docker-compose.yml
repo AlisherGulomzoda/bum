@@ -1,0 +1,110 @@
+version: "3.5"
+
+services:
+  # specifying our bum service
+  application:
+    # build from Dockerfile.dev
+    build:
+      # search at current directory
+      context: .
+      dockerfile: Dockerfile.dev
+    # map current directory to /backend directory of the container
+    volumes:
+      - ./log/:/app/log
+    # exclude port used by our backend
+    ports:
+      - '8080:8080'
+    # specify containers that our backend depends on
+    command:
+      - /bin/sh
+      - -c
+      - |
+        ./bum-service migrate up --config_path=config_for_docker_dev.yml
+        ./bum-service run --config_path=config_for_docker_dev.yml
+        echo "docker"
+    depends_on:
+      postgres_database:
+        condition: service_healthy
+
+  # specifying our local postgres database
+  postgres_database:
+    # use a specific version to avoid bugs
+    image: postgres:15.2-alpine3.17
+    container_name: bum_service_postgres_database
+    # always retry if it fails
+    restart: always
+    # exclude port to connect to it from outside
+    ports:
+      - '5436:5432'
+    # specify environment variables that we will be used for creating a database
+    environment:
+      # set the superuser name and password for PostgresSQL
+      POSTGRES_PASSWORD: test
+      POSTGRES_USER: root
+      # set default database
+      POSTGRES_DB: postgres
+      # set variables for our bash script to create a database and a user
+      APP_DB_USER: bum_service_user
+      APP_DB_PASS: bum_service_password
+      APP_DB_NAME: bum_service_database
+      APP_DB_SCHEMA: bum_service_schema
+    # specifying our directory mapping
+    volumes:
+      # use database-init.sh script to initialize the database
+      - ./scripts/init-database.sh:/docker-entrypoint-initdb.d/init-database.sh
+    # specify health check to make our backend wait for the database to be healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -q --username $${APP_DB_USER} --dbname $${APP_DB_NAME}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter
+    container_name: postgres_exporter
+    environment:
+      DATA_SOURCE_URI: postgres_database:5432/bum_service_database?sslmode=disable
+      DATA_SOURCE_USER: bum_service_user
+      DATA_SOURCE_PASS: bum_service_password
+    ports:
+      - "9187:9187"
+    healthcheck:
+      test: [ "CMD-SHELL", "wget --spider -q http://localhost:9187/metrics || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      postgres_database:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: grafana
+    restart: always
+    ports:
+      - '3001:3000'
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.3.0
+    container_name: prometheus
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      postgres-exporter:
+        condition: service_healthy

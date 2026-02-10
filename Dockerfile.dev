@@ -1,0 +1,24 @@
+FROM golang:1.22-alpine3.20 AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+
+RUN go mod download
+
+COPY . .
+
+RUN GIT_COMMIT=$(git describe --abbrev=4 --dirty --always --tags) && \
+    go build -ldflags "-X main.version=$GIT_COMMIT" -o bum-service ./cmd/bum-service/
+
+FROM alpine:3.20 AS runner
+
+WORKDIR /app
+
+RUN mkdir log
+
+COPY --from=builder /app/bum-service /app/config_for_docker_dev.yml ./
+
+CMD ["./bum-service", "run", "--config_path=config_for_docker_dev.yml"]

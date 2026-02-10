@@ -1,0 +1,34 @@
+application:
+  env: local
+  password_cost: 8
+  access_token_exp: 15m
+  refresh_token_exp: 24h
+  jwt_secret: jwt_secret
+
+logger:
+  level: debug
+  outputs:
+    - ConsoleStdOutput
+    - log/log.log
+  formatter: human-readable
+  time_stamp_format: "2006-01-02 15:04:05Z07:00"
+  caller: true
+
+graceful_shutdown_timeout: 10s
+
+controller:
+  http:
+    address:
+    port: 8080
+
+infrastructure:
+  database:
+    dialect: postgres
+    user: bum_service_user
+    password: bum_service_password
+    name: bum_service_database
+    host: postgres_database
+    port: 5432
+    ssl_mode: disable
+    schema: bum_service_schema
+    idle_in_transaction_session_timeout: 10s
